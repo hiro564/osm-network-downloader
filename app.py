@@ -56,9 +56,11 @@ with tab1:
                 status_text.text("道路ネットワークをダウンロード中...")
                 progress_bar.progress(20)
                 
+                # 新しいAPI（正しい）
                 G = ox.graph_from_bbox(
-                    north=north, south=south, east=east, west=west,
-                    network_type=network_type, simplify=simplify_graph
+                bbox=(north, south, east, west),
+                network_type=network_type,
+                simplify=simplify_graph
                 )
                 
                 progress_bar.progress(40)
