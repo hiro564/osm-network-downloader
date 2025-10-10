@@ -1,1 +1,7 @@
-
+streamlit
+osmnx
+pandas
+numpy
+matplotlib
+geopandas
+networkx
