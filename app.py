@@ -3,19 +3,108 @@ import osmnx as ox
 import pandas as pd
 from shapely.geometry import box
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import requests
 from PIL import Image
 import io
+import math
+from io import BytesIO
 
 st.set_page_config(
-    page_title="OSM道路ネットワーク＆地図画像取得",
+    page_title="OSM道路ネットワーク＆タイル地図取得",
     page_icon="🗺️",
     layout="wide"
 )
 
-st.title("🗺️ OSM道路ネットワーク＆地図画像取得ツール")
-st.markdown("OpenStreetMapから道路ネットワークデータと地図画像を取得")
+st.title("🗺️ OSM道路ネットワーク＆タイル地図取得ツール")
+st.markdown("OpenStreetMapから道路ネットワークデータとタイル地図画像を取得")
 st.markdown("---")
+
+# タイル座標計算関数
+def deg2num(lat_deg, lon_deg, zoom):
+    """緯度経度からタイル座標を計算"""
+    lat_rad = math.radians(lat_deg)
+    n = 2.0 ** zoom
+    xtile = int((lon_deg + 180.0) / 360.0 * n)
+    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    return (xtile, ytile)
+
+def num2deg(xtile, ytile, zoom):
+    """タイル座標から緯度経度を計算"""
+    n = 2.0 ** zoom
+    lon_deg = xtile / n * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
+    lat_deg = math.degrees(lat_rad)
+    return (lat_deg, lon_deg)
+
+def get_tile_image(zoom, x, y, tile_server='cartodb'):
+    """指定されたタイルを取得"""
+    if tile_server == 'cartodb':
+        url = f'https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{zoom}/{x}/{y}.png'
+    else:
+        url = f'https://tile.openstreetmap.org/{zoom}/{x}/{y}.png'
+    
+    try:
+        headers = {'User-Agent': 'OSM Tile Fetcher'}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return Image.open(BytesIO(response.content))
+        else:
+            return None
+    except Exception as e:
+        st.warning(f"タイル取得失敗 ({zoom}/{x}/{y}): {e}")
+        return None
+
+def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360, tile_server='cartodb'):
+    """タイルを組み合わせて地図画像を作成"""
+    
+    # タイル座標を計算
+    x_min, y_max = deg2num(north, west, zoom)
+    x_max, y_min = deg2num(south, east, zoom)
+    
+    # タイルサイズ
+    tile_size = 256
+    
+    # 必要なタイル数
+    x_tiles = x_max - x_min + 1
+    y_tiles = y_max - y_min + 1
+    
+    # タイル画像を結合
+    map_width = x_tiles * tile_size
+    map_height = y_tiles * tile_size
+    
+    map_image = Image.new('RGB', (map_width, map_height))
+    
+    # タイルをダウンロードして配置
+    for x in range(x_min, x_max + 1):
+        for y in range(y_min, y_max + 1):
+            tile = get_tile_image(zoom, x, y, tile_server)
+            if tile:
+                x_offset = (x - x_min) * tile_size
+                y_offset = (y - y_min) * tile_size
+                map_image.paste(tile, (x_offset, y_offset))
+    
+    # 実際の座標範囲に対応する領域を切り出し
+    # 左上のタイルの左上座標
+    nw_lat, nw_lon = num2deg(x_min, y_min, zoom)
+    # 右下のタイルの右下座標
+    se_lat, se_lon = num2deg(x_max + 1, y_max + 1, zoom)
+    
+    # ピクセル座標を計算
+    x_ratio = map_width / (se_lon - nw_lon)
+    y_ratio = map_height / (nw_lat - se_lat)
+    
+    crop_x1 = int((west - nw_lon) * x_ratio)
+    crop_y1 = int((nw_lat - north) * y_ratio)
+    crop_x2 = int((east - nw_lon) * x_ratio)
+    crop_y2 = int((nw_lat - south) * y_ratio)
+    
+    # クロップ
+    cropped_image = map_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+    
+    # 指定されたサイズにリサイズ
+    resized_image = cropped_image.resize((width, height), Image.Resampling.LANCZOS)
+    
+    return resized_image
 
 # サイドバー設定
 st.sidebar.header("⚙️ 設定")
@@ -42,15 +131,23 @@ network_type = st.sidebar.selectbox(
 )
 
 # 地図画像設定
-st.sidebar.subheader("🖼️ 地図画像設定")
+st.sidebar.subheader("🖼️ タイル地図設定")
+zoom_level = st.sidebar.slider("ズームレベル", min_value=10, max_value=19, value=16, 
+                                help="数値が大きいほど詳細な地図")
 image_width = st.sidebar.number_input("画像幅 (px)", value=480, min_value=100, max_value=2000)
 image_height = st.sidebar.number_input("画像高さ (px)", value=360, min_value=100, max_value=2000)
-dpi = st.sidebar.slider("解像度 (DPI)", min_value=50, max_value=300, value=100)
+
+tile_server = st.sidebar.selectbox(
+    "タイルサーバー",
+    options=['cartodb', 'osm'],
+    index=0,
+    help="cartodb: 明るく見やすい, osm: 標準OpenStreetMap"
+)
 
 # データ取得オプション
 st.sidebar.subheader("📦 取得データ")
 get_network = st.sidebar.checkbox("道路ネットワークCSV", value=True)
-get_image = st.sidebar.checkbox("地図画像", value=True)
+get_tile_map = st.sidebar.checkbox("タイル地図画像", value=True)
 
 # メイン画面
 if st.button("🚀 データ取得開始", type="primary"):
@@ -64,7 +161,7 @@ if st.button("🚀 データ取得開始", type="primary"):
             polygon = box(west, south, east, north)
             
             # 道路ネットワークデータを取得
-            if get_network or get_image:
+            if get_network:
                 status.text("道路ネットワークをダウンロード中...")
                 progress_bar.progress(10)
                 
@@ -72,25 +169,10 @@ if st.button("🚀 データ取得開始", type="primary"):
                 
                 progress_bar.progress(30)
                 status.text(f"取得完了: {len(G.nodes())}ノード, {len(G.edges())}エッジ")
-            
-            # 建物データを取得
-            if get_image:
-                status.text("建物データをダウンロード中...")
-                progress_bar.progress(40)
                 
-                try:
-                    buildings = ox.features_from_polygon(polygon, tags={'building': True})
-                    status.text(f"建物データ取得完了: {len(buildings)}件")
-                except Exception as e:
-                    st.warning(f"建物データの取得に失敗: {e}")
-                    buildings = None
-                
-                progress_bar.progress(50)
-            
-            # CSVデータ生成
-            if get_network:
+                # CSVデータ生成
                 status.text("データを変換中...")
-                progress_bar.progress(60)
+                progress_bar.progress(50)
                 
                 gdf_nodes, gdf_edges = ox.graph_to_gdfs(G, nodes=True, edges=True, 
                                                          node_geometry=True, fill_edge_geometry=True)
@@ -103,48 +185,20 @@ if st.button("🚀 データ取得開始", type="primary"):
                 node_csv = node_df.to_csv(index=True)
                 edge_csv = edge_df.to_csv(index=True)
             
-            # 地図画像生成
-            if get_image:
-                status.text("地図画像を生成中...")
-                progress_bar.progress(70)
+            # タイル地図画像生成
+            if get_tile_map:
+                status.text(f"タイル地図を生成中（ズーム{zoom_level}）...")
+                progress_bar.progress(60)
                 
-                # 画像サイズ計算
-                fig_width = image_width / dpi
-                fig_height = image_height / dpi
-                
-                # 図を作成
-                fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
-                
-                # 建物を描画
-                if buildings is not None and len(buildings) > 0:
-                    buildings.plot(ax=ax, facecolor='#CCCCCC', edgecolor='#999999', 
-                                   linewidth=0.5, alpha=0.7, zorder=1)
-                
-                # 道路を描画
-                ox.plot_graph(G, ax=ax, node_size=0, edge_color='#666666', 
-                             edge_linewidth=1.5, bgcolor='white', show=False, close=False)
-                
-                # 軸を非表示
-                ax.set_xlim([west, east])
-                ax.set_ylim([south, north])
-                ax.axis('off')
-                plt.tight_layout(pad=0)
-                
-                # 画像をバッファに保存
-                buf = io.BytesIO()
-                plt.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', pad_inches=0)
-                buf.seek(0)
-                map_image = Image.open(buf)
-                
-                # 画像をリサイズ（正確なサイズに）
-                map_image = map_image.resize((image_width, image_height), Image.Resampling.LANCZOS)
+                tile_map_image = create_map_from_tiles(
+                    north, south, east, west, 
+                    zoom_level, image_width, image_height, tile_server
+                )
                 
                 # PNG保存用
                 img_buffer = io.BytesIO()
-                map_image.save(img_buffer, format='PNG')
+                tile_map_image.save(img_buffer, format='PNG')
                 img_bytes = img_buffer.getvalue()
-                
-                plt.close(fig)
                 
                 progress_bar.progress(90)
             
@@ -166,10 +220,11 @@ if st.button("🚀 データ取得開始", type="primary"):
                 with col4:
                     st.metric("エッジ列数", len(edge_df.columns))
             
-            # 地図画像表示
-            if get_image:
-                st.subheader("🗺️ 生成された地図画像")
-                st.image(map_image, caption=f"{area_name} - {image_width}×{image_height}px", use_column_width=True)
+            # タイル地図画像表示
+            if get_tile_map:
+                st.subheader("🗺️ 生成されたタイル地図画像")
+                st.image(tile_map_image, caption=f"{area_name} - {image_width}×{image_height}px (Zoom {zoom_level})", 
+                        use_column_width=True)
                 
                 # 座標情報表示
                 st.info(f"""
@@ -178,7 +233,9 @@ if st.button("🚀 データ取得開始", type="primary"):
                 - 南端: {south}
                 - 東端: {east}
                 - 西端: {west}
+                - ズームレベル: {zoom_level}
                 - サイズ: {image_width}×{image_height}px
+                - タイルサーバー: {tile_server}
                 """)
             
             # データプレビュー
@@ -213,12 +270,12 @@ if st.button("🚀 データ取得開始", type="primary"):
                         type="primary"
                     )
             
-            if get_image:
+            if get_tile_map:
                 with download_cols[2]:
                     st.download_button(
-                        label="📥 地図画像 (PNG)",
+                        label="📥 タイル地図 (PNG)",
                         data=img_bytes,
-                        file_name=f"{area_name}_Map_{image_width}x{image_height}.png",
+                        file_name=f"{area_name}_TileMap_zoom{zoom_level}_{image_width}x{image_height}.png",
                         mime='image/png',
                         type="primary"
                     )
