@@ -2,7 +2,8 @@ import streamlit as st
 import osmnx as ox
 import pandas as pd
 from shapely.geometry import box
-import matplotlib.pyplot as plt
+import folium
+from streamlit_folium import st_folium
 import requests
 from PIL import Image
 import io
@@ -10,14 +11,23 @@ import math
 from io import BytesIO
 
 st.set_page_config(
-    page_title="OSM道路ネットワーク＆タイル地図取得",
+    page_title="インタラクティブOSM取得ツール",
     page_icon="🗺️",
     layout="wide"
 )
 
-st.title("🗺️ OSM道路ネットワーク＆タイル地図取得ツール")
-st.markdown("OpenStreetMapから道路ネットワークデータとタイル地図画像を取得")
+st.title("🗺️ インタラクティブOSM取得ツール")
+st.markdown("地図を動かして範囲を選択 → データ取得")
 st.markdown("---")
+
+# セッションステートの初期化
+if 'north' not in st.session_state:
+    st.session_state.north = 35.3600
+    st.session_state.south = 35.2900
+    st.session_state.east = 139.5700
+    st.session_state.west = 139.4800
+    st.session_state.center_lat = 35.325
+    st.session_state.center_lon = 139.525
 
 # タイル座標計算関数
 def deg2num(lat_deg, lon_deg, zoom):
@@ -51,7 +61,6 @@ def get_tile_image(zoom, x, y, tile_server='cartodb'):
         else:
             return None
     except Exception as e:
-        st.warning(f"タイル取得失敗 ({zoom}/{x}/{y}): {e}")
         return None
 
 def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360, tile_server='cartodb'):
@@ -84,9 +93,7 @@ def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360,
                 map_image.paste(tile, (x_offset, y_offset))
     
     # 実際の座標範囲に対応する領域を切り出し
-    # 左上のタイルの左上座標
     nw_lat, nw_lon = num2deg(x_min, y_min, zoom)
-    # 右下のタイルの右下座標
     se_lat, se_lon = num2deg(x_max + 1, y_max + 1, zoom)
     
     # ピクセル座標を計算
@@ -111,16 +118,6 @@ st.sidebar.header("⚙️ 設定")
 
 # エリア名入力
 area_name = st.sidebar.text_input("エリア名", value="MyArea", help="出力ファイル名に使用されます")
-
-# 座標範囲入力
-st.sidebar.subheader("📍 取得範囲（緯度経度）")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    north = st.number_input("北端緯度", value=35.3600, format="%.6f")
-    south = st.number_input("南端緯度", value=35.2900, format="%.6f")
-with col2:
-    east = st.number_input("東端経度", value=139.5700, format="%.6f")
-    west = st.number_input("西端経度", value=139.4800, format="%.6f")
 
 # ネットワークタイプ選択
 network_type = st.sidebar.selectbox(
@@ -149,13 +146,110 @@ st.sidebar.subheader("📦 取得データ")
 get_network = st.sidebar.checkbox("道路ネットワークCSV", value=True)
 get_tile_map = st.sidebar.checkbox("タイル地図画像", value=True)
 
-# メイン画面
-if st.button("🚀 データ取得開始", type="primary"):
+# インタラクティブ地図セクション
+st.header("🗺️ 地図で範囲を選択")
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("地図を動かして範囲を調整")
+    
+    # Folium地図を作成
+    m = folium.Map(
+        location=[st.session_state.center_lat, st.session_state.center_lon],
+        zoom_start=13,
+        tiles='OpenStreetMap'
+    )
+    
+    # 現在の範囲を矩形で表示
+    folium.Rectangle(
+        bounds=[[st.session_state.south, st.session_state.west], 
+                [st.session_state.north, st.session_state.east]],
+        color='red',
+        fill=True,
+        fillColor='red',
+        fillOpacity=0.1,
+        popup='取得範囲'
+    ).add_to(m)
+    
+    # 地図を表示
+    map_data = st_folium(m, width=700, height=500, returned_objects=["bounds"])
+    
+    # 地図の表示範囲を取得
+    if map_data and map_data.get("bounds"):
+        bounds = map_data["bounds"]
+        st.session_state.south = bounds["_southWest"]["lat"]
+        st.session_state.west = bounds["_southWest"]["lng"]
+        st.session_state.north = bounds["_northEast"]["lat"]
+        st.session_state.east = bounds["_northEast"]["lng"]
+        st.session_state.center_lat = (st.session_state.north + st.session_state.south) / 2
+        st.session_state.center_lon = (st.session_state.east + st.session_state.west) / 2
+
+with col2:
+    st.subheader("現在の範囲")
+    
+    # 座標の表示と微調整
+    st.session_state.north = st.number_input("北端緯度", value=st.session_state.north, format="%.6f", key="north_input")
+    st.session_state.south = st.number_input("南端緯度", value=st.session_state.south, format="%.6f", key="south_input")
+    st.session_state.east = st.number_input("東端経度", value=st.session_state.east, format="%.6f", key="east_input")
+    st.session_state.west = st.number_input("西端経度", value=st.session_state.west, format="%.6f", key="west_input")
+    
+    # 範囲のサイズを計算
+    lat_diff = st.session_state.north - st.session_state.south
+    lon_diff = st.session_state.east - st.session_state.west
+    
+    # 概算距離（緯度1度≒111km、経度は緯度によって変わる）
+    lat_km = lat_diff * 111
+    lon_km = lon_diff * 111 * math.cos(math.radians(st.session_state.center_lat))
+    
+    st.metric("南北距離", f"{lat_km:.2f} km")
+    st.metric("東西距離", f"{lon_km:.2f} km")
+    st.metric("面積", f"{lat_km * lon_km:.2f} km²")
+    
+    # プリセット範囲ボタン
+    st.subheader("📍 プリセット")
+    
+    if st.button("東京タワー周辺"):
+        st.session_state.north = 35.660
+        st.session_state.south = 35.657
+        st.session_state.east = 139.747
+        st.session_state.west = 139.743
+        st.session_state.center_lat = 35.6585
+        st.session_state.center_lon = 139.745
+        st.rerun()
+    
+    if st.button("渋谷駅周辺"):
+        st.session_state.north = 35.663
+        st.session_state.south = 35.655
+        st.session_state.east = 139.704
+        st.session_state.west = 139.696
+        st.session_state.center_lat = 35.659
+        st.session_state.center_lon = 139.700
+        st.rerun()
+    
+    if st.button("鎌倉市"):
+        st.session_state.north = 35.360
+        st.session_state.south = 35.290
+        st.session_state.east = 139.570
+        st.session_state.west = 139.480
+        st.session_state.center_lat = 35.325
+        st.session_state.center_lon = 139.525
+        st.rerun()
+
+st.markdown("---")
+
+# データ取得ボタン
+if st.button("🚀 この範囲のデータを取得", type="primary", use_container_width=True):
     try:
         with st.spinner("OpenStreetMapからデータを取得中..."):
             # プログレスバー
             progress_bar = st.progress(0)
             status = st.empty()
+            
+            north = st.session_state.north
+            south = st.session_state.south
+            east = st.session_state.east
+            west = st.session_state.west
             
             # ポリゴンを作成
             polygon = box(west, south, east, north)
