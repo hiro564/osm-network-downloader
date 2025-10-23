@@ -2,15 +2,19 @@ import streamlit as st
 import osmnx as ox
 import pandas as pd
 from shapely.geometry import box
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from PIL import Image
+import io
 
 st.set_page_config(
-    page_title="OSM道路ネットワーク取得",
+    page_title="OSM道路ネットワーク＆地図画像取得",
     page_icon="🗺️",
     layout="wide"
 )
 
-st.title("🗺️ OSM道路ネットワーク取得ツール")
-st.markdown("OpenStreetMapから道路ネットワークデータを取得してCSV出力")
+st.title("🗺️ OSM道路ネットワーク＆地図画像取得ツール")
+st.markdown("OpenStreetMapから道路ネットワークデータと地図画像を取得")
 st.markdown("---")
 
 # サイドバー設定
@@ -37,6 +41,17 @@ network_type = st.sidebar.selectbox(
     help="drive: 車道, walk: 歩道, all: 全道路, bike: 自転車道"
 )
 
+# 地図画像設定
+st.sidebar.subheader("🖼️ 地図画像設定")
+image_width = st.sidebar.number_input("画像幅 (px)", value=480, min_value=100, max_value=2000)
+image_height = st.sidebar.number_input("画像高さ (px)", value=360, min_value=100, max_value=2000)
+dpi = st.sidebar.slider("解像度 (DPI)", min_value=50, max_value=300, value=100)
+
+# データ取得オプション
+st.sidebar.subheader("📦 取得データ")
+get_network = st.sidebar.checkbox("道路ネットワークCSV", value=True)
+get_image = st.sidebar.checkbox("地図画像", value=True)
+
 # メイン画面
 if st.button("🚀 データ取得開始", type="primary"):
     try:
@@ -45,34 +60,93 @@ if st.button("🚀 データ取得開始", type="primary"):
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # 道路ネットワークデータを取得
-            status.text("道路ネットワークをダウンロード中...")
-            progress_bar.progress(10)
-            
-            # ポリゴンを作成して取得
+            # ポリゴンを作成
             polygon = box(west, south, east, north)
-            G = ox.graph_from_polygon(polygon, network_type=network_type)
             
-            progress_bar.progress(40)
-            status.text(f"取得完了: {len(G.nodes())}ノード, {len(G.edges())}エッジ")
+            # 道路ネットワークデータを取得
+            if get_network or get_image:
+                status.text("道路ネットワークをダウンロード中...")
+                progress_bar.progress(10)
+                
+                G = ox.graph_from_polygon(polygon, network_type=network_type)
+                
+                progress_bar.progress(30)
+                status.text(f"取得完了: {len(G.nodes())}ノード, {len(G.edges())}エッジ")
             
-            # グラフデータからDataFrame形式に変更
-            status.text("データを変換中...")
-            progress_bar.progress(60)
+            # 建物データを取得
+            if get_image:
+                status.text("建物データをダウンロード中...")
+                progress_bar.progress(40)
+                
+                try:
+                    buildings = ox.features_from_polygon(polygon, tags={'building': True})
+                    status.text(f"建物データ取得完了: {len(buildings)}件")
+                except Exception as e:
+                    st.warning(f"建物データの取得に失敗: {e}")
+                    buildings = None
+                
+                progress_bar.progress(50)
             
-            gdf_nodes, gdf_edges = ox.graph_to_gdfs(G, nodes=True, edges=True, 
-                                                     node_geometry=True, fill_edge_geometry=True)
+            # CSVデータ生成
+            if get_network:
+                status.text("データを変換中...")
+                progress_bar.progress(60)
+                
+                gdf_nodes, gdf_edges = ox.graph_to_gdfs(G, nodes=True, edges=True, 
+                                                         node_geometry=True, fill_edge_geometry=True)
+                
+                # DataFrameに変換
+                node_df = pd.DataFrame(gdf_nodes)
+                edge_df = pd.DataFrame(gdf_edges)
+                
+                # CSV生成
+                node_csv = node_df.to_csv(index=True)
+                edge_csv = edge_df.to_csv(index=True)
             
-            # DataFrameに変換
-            node_df = pd.DataFrame(gdf_nodes)
-            edge_df = pd.DataFrame(gdf_edges)
-            
-            progress_bar.progress(80)
-            status.text("CSV生成中...")
-            
-            # CSV生成
-            node_csv = node_df.to_csv(index=True)
-            edge_csv = edge_df.to_csv(index=True)
+            # 地図画像生成
+            if get_image:
+                status.text("地図画像を生成中...")
+                progress_bar.progress(70)
+                
+                # 画像サイズ計算
+                fig_width = image_width / dpi
+                fig_height = image_height / dpi
+                
+                # 図を作成
+                fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
+                
+                # 建物を描画
+                if buildings is not None and len(buildings) > 0:
+                    buildings.plot(ax=ax, facecolor='#CCCCCC', edgecolor='#999999', 
+                                   linewidth=0.5, alpha=0.7, zorder=1)
+                
+                # 道路を描画
+                ox.plot_graph(G, ax=ax, node_size=0, edge_color='#666666', 
+                             edge_linewidth=1.5, bgcolor='white', show=False, close=False)
+                
+                # 軸を非表示
+                ax.set_xlim([west, east])
+                ax.set_ylim([south, north])
+                ax.axis('off')
+                plt.tight_layout(pad=0)
+                
+                # 画像をバッファに保存
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', pad_inches=0)
+                buf.seek(0)
+                map_image = Image.open(buf)
+                
+                # 画像をリサイズ（正確なサイズに）
+                map_image = map_image.resize((image_width, image_height), Image.Resampling.LANCZOS)
+                
+                # PNG保存用
+                img_buffer = io.BytesIO()
+                map_image.save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                
+                plt.close(fig)
+                
+                progress_bar.progress(90)
             
             progress_bar.progress(100)
             status.text("✅ 完了！")
@@ -81,108 +155,75 @@ if st.button("🚀 データ取得開始", type="primary"):
             st.success("🎉 データ取得完了！")
             
             # 統計情報
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("ノード数", f"{len(node_df):,}")
-            with col2:
-                st.metric("エッジ数", f"{len(edge_df):,}")
-            with col3:
-                st.metric("ノード列数", len(node_df.columns))
-            with col4:
-                st.metric("エッジ列数", len(edge_df.columns))
+            if get_network:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("ノード数", f"{len(node_df):,}")
+                with col2:
+                    st.metric("エッジ数", f"{len(edge_df):,}")
+                with col3:
+                    st.metric("ノード列数", len(node_df.columns))
+                with col4:
+                    st.metric("エッジ列数", len(edge_df.columns))
+            
+            # 地図画像表示
+            if get_image:
+                st.subheader("🗺️ 生成された地図画像")
+                st.image(map_image, caption=f"{area_name} - {image_width}×{image_height}px", use_column_width=True)
+                
+                # 座標情報表示
+                st.info(f"""
+                **座標範囲:**
+                - 北端: {north}
+                - 南端: {south}
+                - 東端: {east}
+                - 西端: {west}
+                - サイズ: {image_width}×{image_height}px
+                """)
             
             # データプレビュー
-            st.subheader("📊 ノードデータ プレビュー")
-            st.dataframe(node_df.head(10), use_container_width=True)
-            
-            st.subheader("📊 エッジデータ プレビュー")
-            st.dataframe(edge_df.head(10), use_container_width=True)
+            if get_network:
+                with st.expander("📊 ノードデータ プレビュー"):
+                    st.dataframe(node_df.head(10), use_container_width=True)
+                
+                with st.expander("📊 エッジデータ プレビュー"):
+                    st.dataframe(edge_df.head(10), use_container_width=True)
             
             # ダウンロードボタン
             st.subheader("📥 ダウンロード")
-            col1, col2 = st.columns(2)
             
-            with col1:
-                st.download_button(
-                    label="📥 ノードCSVダウンロード",
-                    data=node_csv,
-                    file_name=f"{area_name}_Node_{network_type}.csv",
-                    mime='text/csv',
-                    type="primary"
-                )
+            download_cols = st.columns(3)
             
-            with col2:
-                st.download_button(
-                    label="📥 エッジCSVダウンロード",
-                    data=edge_csv,
-                    file_name=f"{area_name}_Edge_{network_type}.csv",
-                    mime='text/csv',
-                    type="primary"
-                )
+            if get_network:
+                with download_cols[0]:
+                    st.download_button(
+                        label="📥 ノードCSV",
+                        data=node_csv,
+                        file_name=f"{area_name}_Node_{network_type}.csv",
+                        mime='text/csv',
+                        type="primary"
+                    )
+                
+                with download_cols[1]:
+                    st.download_button(
+                        label="📥 エッジCSV",
+                        data=edge_csv,
+                        file_name=f"{area_name}_Edge_{network_type}.csv",
+                        mime='text/csv',
+                        type="primary"
+                    )
             
-            # ネットワーク可視化
-            st.subheader("🗺️ ネットワーク可視化")
-            try:
-                fig, ax = ox.plot_graph(G, figsize=(12, 12), node_size=5, 
-                                       edge_linewidth=0.5, show=False, close=False)
-                st.pyplot(fig)
-            except Exception as e:
-                st.warning(f"可視化をスキップしました: {e}")
+            if get_image:
+                with download_cols[2]:
+                    st.download_button(
+                        label="📥 地図画像 (PNG)",
+                        data=img_bytes,
+                        file_name=f"{area_name}_Map_{image_width}x{image_height}.png",
+                        mime='image/png',
+                        type="primary"
+                    )
             
     except Exception as e:
         st.error(f"❌ エラーが発生しました")
         st.exception(e)
         st.info("💡 ヒント: 範囲が広すぎるか、データが存在しない可能性があります。範囲を狭めて再試行してください。")
-
-# 使い方
-with st.expander("ℹ️ 使い方"):
-    st.markdown("""
-    ### 📋 使い方
-    
-    1. **エリア名**を入力（出力ファイル名に使用）
-    2. **取得範囲**を緯度経度で指定
-       - 北端緯度 > 南端緯度
-       - 東端経度 > 西端経度
-    3. **ネットワークタイプ**を選択
-       - `drive`: 車道のみ
-       - `walk`: 歩道のみ
-       - `all`: すべての道路
-       - `bike`: 自転車道のみ
-    4. 「データ取得開始」ボタンをクリック
-    5. ノードCSVとエッジCSVをダウンロード
-    
-    ### 📊 出力データ
-    
-    **ノードCSV**: 交差点の情報
-    - NodeID（インデックス）
-    - x（経度）
-    - y（緯度）
-    - その他のOSM属性
-    
-    **エッジCSV**: 道路の情報
-    - u, v, key（接続ノードID）
-    - length（道路の長さ）
-    - geometry（道路の形状）
-    - その他のOSM属性（道路名、種別など）
-    
-    ### 💡 座標の例
-    
-    **東京都心部:**
-    - 北: 35.70, 南: 35.65, 東: 139.80, 西: 139.70
-    
-    **鎌倉市:**
-    - 北: 35.36, 南: 35.29, 東: 139.57, 西: 139.48
-    
-    ### ⚠️ 注意
-    - 広範囲の取得には時間がかかります
-    - 小さい範囲から試すことをおすすめします
-    """)
-
-# フッター
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; padding: 20px;'>
-    <p>OpenStreetMapから道路ネットワークデータを取得</p>
-    <p>Data © OpenStreetMap contributors</p>
-</div>
-""", unsafe_allow_html=True)
