@@ -91,16 +91,30 @@ def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360,
         
         total_tiles = x_tiles * y_tiles
         
-        # タイル数の制限（メモリ対策）
-        if total_tiles > 100:
-            st.warning(f"⚠️ タイル数が多すぎます（{total_tiles}枚）。ズームを下げるか範囲を狭めてください。")
-            return None
-        
         # タイル画像を結合
         map_width = x_tiles * tile_size
         map_height = y_tiles * tile_size
         
-        map_image = Image.new('RGB', (map_width, map_height), color='white')
+        # 画像サイズの制限（メモリ対策）
+        max_dimension = 10000  # 最大10000ピクセル
+        max_tiles = 50  # 最大50タイル
+        
+        if map_width > max_dimension or map_height > max_dimension:
+            st.error(f"❌ 画像サイズが大きすぎます（{map_width}×{map_height}px）。ズームレベルを下げてください。")
+            st.info(f"💡 現在のタイル数: {x_tiles}×{y_tiles}={total_tiles}枚。ズームを{zoom-2}以下に下げることをお勧めします。")
+            return None
+        
+        if total_tiles > max_tiles:
+            st.error(f"❌ タイル数が多すぎます（{total_tiles}枚、上限{max_tiles}枚）。")
+            st.info(f"💡 ズームレベルを下げるか、範囲を狭めてください。\n- 現在: zoom={zoom}, タイル{x_tiles}×{y_tiles}\n- 推奨: zoom={max(10, zoom-2)}")
+            return None
+        
+        try:
+            map_image = Image.new('RGB', (map_width, map_height), color='white')
+        except Exception as e:
+            st.error(f"❌ 画像作成に失敗しました: {str(e)}")
+            st.info(f"💡 画像サイズ: {map_width}×{map_height}px。ズームを下げてください。")
+            return None
         
         # プログレスバー
         progress_bar = st.progress(0)
