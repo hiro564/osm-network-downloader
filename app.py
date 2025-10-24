@@ -58,10 +58,29 @@ def get_tile_image(zoom, x, y, tile_server='cartodb'):
 def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360, tile_server='cartodb'):
     """タイルを組み合わせて地図画像を作成"""
     
+    # 入力値の検証
+    if north <= south:
+        st.error("❌ 北端緯度は南端緯度より大きい値にしてください")
+        return None
+    if east <= west:
+        st.error("❌ 東端経度は西端経度より大きい値にしてください")
+        return None
+    
+    # 範囲が極端に小さい場合の警告
+    lat_diff = north - south
+    lon_diff = east - west
+    if lat_diff < 0.001 or lon_diff < 0.001:
+        st.warning("⚠️ 指定範囲が非常に小さいです。範囲を広げることをお勧めします。")
+    
     with st.spinner(f'タイル地図を生成中... (ズーム{zoom})'):
         # タイル座標を計算
         x_min, y_max = deg2num(north, west, zoom)
         x_max, y_min = deg2num(south, east, zoom)
+        
+        # タイル座標の検証
+        if x_min == x_max or y_min == y_max:
+            st.error("❌ 指定範囲が小さすぎて地図を生成できません。範囲を広げてください。")
+            return None
         
         # タイルサイズ
         tile_size = 256
@@ -108,14 +127,27 @@ def create_map_from_tiles(north, south, east, west, zoom, width=480, height=360,
         nw_lat, nw_lon = num2deg(x_min, y_min, zoom)
         se_lat, se_lon = num2deg(x_max + 1, y_max + 1, zoom)
         
+        # ゼロ除算を防ぐ
+        lat_range = nw_lat - se_lat
+        lon_range = se_lon - nw_lon
+        
+        if abs(lat_range) < 1e-10 or abs(lon_range) < 1e-10:
+            st.error("❌ タイル座標の計算エラー。範囲を変更してください。")
+            return None
+        
         # ピクセル座標を計算
-        x_ratio = map_width / (se_lon - nw_lon)
-        y_ratio = map_height / (nw_lat - se_lat)
+        x_ratio = map_width / lon_range
+        y_ratio = map_height / lat_range
         
         crop_x1 = max(0, int((west - nw_lon) * x_ratio))
         crop_y1 = max(0, int((nw_lat - north) * y_ratio))
         crop_x2 = min(map_width, int((east - nw_lon) * x_ratio))
         crop_y2 = min(map_height, int((nw_lat - south) * y_ratio))
+        
+        # クロップ領域の検証
+        if crop_x2 <= crop_x1 or crop_y2 <= crop_y1:
+            st.error("❌ 画像のクロップ範囲が不正です。")
+            return None
         
         # クロップ
         cropped_image = map_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
@@ -211,6 +243,14 @@ st.header("📊 データ取得")
 # データ取得ボタン
 if st.button("🚀 データ取得開始", type="primary", use_container_width=True):
     try:
+        # 入力値の事前検証
+        if north <= south:
+            st.error("❌ 北端緯度は南端緯度より大きい値を入力してください")
+            st.stop()
+        if east <= west:
+            st.error("❌ 東端経度は西端経度より大きい値を入力してください")
+            st.stop()
+        
         # プログレスバー
         progress_bar = st.progress(0)
         status = st.empty()
@@ -342,4 +382,3 @@ if st.button("🚀 データ取得開始", type="primary", use_container_width=T
         st.error(f"❌ エラーが発生しました")
         st.exception(e)
         st.info("💡 ヒント: 範囲が広すぎるか、ズームレベルが高すぎる可能性があります。範囲を狭めるかズームを下げて再試行してください。")
-
