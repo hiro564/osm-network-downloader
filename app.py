@@ -3,6 +3,10 @@ import osmnx as ox
 import pandas as pd
 from shapely.geometry import box
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from PIL import Image
+import io
 
 # Scratch座標系の定義
 SCRATCH_WIDTH = 480
@@ -164,6 +168,149 @@ def convert_to_scratch_format(G, bounds):
     
     return nodes_df, edges_df
 
+def generate_map_image(G, bounds, nodes_df, edges_df):
+    """
+    道路ネットワークの画像を生成（480x360ピクセル、Scratch座標系）
+    
+    Args:
+        G: OSMグラフ
+        bounds: (north, south, east, west)
+        nodes_df: ノードデータフレーム
+        edges_df: エッジデータフレーム
+    
+    Returns:
+        PIL Image: 480x360ピクセルの画像
+    """
+    # 図のサイズを設定（480x360ピクセル、72dpi）
+    fig_width = 480 / 72  # インチ
+    fig_height = 360 / 72  # インチ
+    
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height), dpi=72)
+    
+    # Scratch座標系に合わせる
+    ax.set_xlim(SCRATCH_X_MIN, SCRATCH_X_MAX)
+    ax.set_ylim(SCRATCH_Y_MIN, SCRATCH_Y_MAX)
+    ax.set_aspect('equal')
+    
+    # 背景を白に
+    ax.set_facecolor('white')
+    fig.patch.set_facecolor('white')
+    
+    # グリッド線を追加（オプション）
+    ax.grid(True, alpha=0.2, linestyle='--', linewidth=0.5)
+    
+    # 軸ラベル
+    ax.set_xlabel('X (Scratch座標)', fontsize=8)
+    ax.set_ylabel('Y (Scratch座標)', fontsize=8)
+    ax.tick_params(labelsize=7)
+    
+    # 原点を強調
+    ax.axhline(y=0, color='gray', linewidth=0.5, linestyle='-', alpha=0.5)
+    ax.axvline(x=0, color='gray', linewidth=0.5, linestyle='-', alpha=0.5)
+    
+    # エッジを描画（道路）
+    edge_dict = {}
+    for _, row in edges_df.iterrows():
+        from_id = row['FromID']
+        to_id = row['ToID']
+        # 重複を避けるため、小さいIDを先にしたタプルで管理
+        edge_key = tuple(sorted([from_id, to_id]))
+        if edge_key not in edge_dict:
+            edge_dict[edge_key] = True
+            
+            from_node = nodes_df[nodes_df['ID'] == from_id].iloc[0]
+            to_node = nodes_df[nodes_df['ID'] == to_id].iloc[0]
+            
+            ax.plot([from_node['X'], to_node['X']], 
+                   [from_node['Y'], to_node['Y']], 
+                   color='#333333', linewidth=1.5, alpha=0.7, zorder=1)
+    
+    # ノードを描画
+    ax.scatter(nodes_df['X'], nodes_df['Y'], 
+              c='red', s=15, alpha=0.8, zorder=2, edgecolors='white', linewidths=0.5)
+    
+    # タイトル
+    ax.set_title('Road Network (Scratch Coordinate System)', 
+                fontsize=10, pad=10)
+    
+    # レイアウト調整
+    plt.tight_layout(pad=0.5)
+    
+    # 画像をバイトストリームに保存
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=72, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    buf.seek(0)
+    
+    # PIL Imageに変換
+    img = Image.open(buf)
+    
+    # 正確に480x360にリサイズ
+    img = img.resize((480, 360), Image.Resampling.LANCZOS)
+    
+    plt.close(fig)
+    
+    return img
+
+def generate_simple_map_image(nodes_df, edges_df):
+    """
+    シンプルな道路ネットワーク画像を生成（480x360ピクセル）
+    背景透過なし、道路のみの表示
+    
+    Returns:
+        PIL Image: 480x360ピクセルの画像
+    """
+    # 図のサイズを正確に設定
+    fig, ax = plt.subplots(figsize=(480/72, 360/72), dpi=72)
+    
+    # Scratch座標系に合わせる
+    ax.set_xlim(SCRATCH_X_MIN, SCRATCH_X_MAX)
+    ax.set_ylim(SCRATCH_Y_MIN, SCRATCH_Y_MAX)
+    ax.set_aspect('equal')
+    
+    # 背景を白に
+    ax.set_facecolor('white')
+    fig.patch.set_facecolor('white')
+    
+    # 軸を非表示
+    ax.axis('off')
+    
+    # エッジを描画（道路）
+    edge_dict = {}
+    for _, row in edges_df.iterrows():
+        from_id = row['FromID']
+        to_id = row['ToID']
+        edge_key = tuple(sorted([from_id, to_id]))
+        
+        if edge_key not in edge_dict:
+            edge_dict[edge_key] = True
+            
+            from_node = nodes_df[nodes_df['ID'] == from_id].iloc[0]
+            to_node = nodes_df[nodes_df['ID'] == to_id].iloc[0]
+            
+            ax.plot([from_node['X'], to_node['X']], 
+                   [from_node['Y'], to_node['Y']], 
+                   color='black', linewidth=2, alpha=1.0, zorder=1)
+    
+    # マージンなしで保存
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    
+    # 画像をバイトストリームに保存
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=72, bbox_inches='tight', 
+                pad_inches=0, facecolor='white')
+    buf.seek(0)
+    
+    # PIL Imageに変換
+    img = Image.open(buf)
+    
+    # 正確に480x360にリサイズ
+    img = img.resize((480, 360), Image.Resampling.LANCZOS)
+    
+    plt.close(fig)
+    
+    return img
+
 # メインエリア
 st.header("📊 データ取得と変換")
 
@@ -221,9 +368,25 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         
         nodes_df, edges_df = convert_to_scratch_format(G, bounds)
         
+        # 画像生成
+        status.text("🎨 地図画像を生成中...")
+        progress_bar.progress(85)
+        
+        map_image = generate_map_image(G, bounds, nodes_df, edges_df)
+        simple_map_image = generate_simple_map_image(nodes_df, edges_df)
+        
         # CSV生成
         node_csv = nodes_df[['ID', 'X', 'Y', 'Latitude', 'Longitude']].to_csv(index=False)
         edge_csv = edges_df.to_csv(index=False)
+        
+        # 画像をバイトストリームに変換
+        img_buf = io.BytesIO()
+        map_image.save(img_buf, format='PNG')
+        img_bytes = img_buf.getvalue()
+        
+        simple_img_buf = io.BytesIO()
+        simple_map_image.save(simple_img_buf, format='PNG')
+        simple_img_bytes = simple_img_buf.getvalue()
         
         progress_bar.progress(100)
         status.text("✅ 変換完了！")
@@ -249,7 +412,21 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         - 経度範囲: {west:.6f} 〜 {east:.6f}
         - ネットワークタイプ: {network_type}
         - Scratch座標: X({SCRATCH_X_MIN}〜{SCRATCH_X_MAX}), Y({SCRATCH_Y_MIN}〜{SCRATCH_Y_MAX})
+        - 画像サイズ: 480 x 360 ピクセル
         """)
+        
+        # 地図画像の表示
+        st.subheader("🗺️ 生成された地図画像")
+        
+        tab1, tab2 = st.tabs(["📊 座標軸付き", "🎨 シンプル版"])
+        
+        with tab1:
+            st.image(map_image, caption="道路ネットワーク（座標軸・グリッド付き）", use_container_width=True)
+            st.caption("✅ Scratch座標系の座標軸とグリッド線が表示されています")
+        
+        with tab2:
+            st.image(simple_map_image, caption="道路ネットワーク（道路のみ）", use_container_width=True)
+            st.caption("✅ 道路のみのシンプルな表示。Scratchの背景画像として使用できます")
         
         # データプレビュー
         with st.expander("📊 ノードデータ プレビュー (Scratch座標系)"):
@@ -295,6 +472,8 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         # ダウンロードボタン
         st.subheader("📥 ダウンロード")
         
+        # CSVダウンロード
+        st.markdown("**📊 CSVデータ**")
         col1, col2 = st.columns(2)
         
         with col1:
@@ -314,6 +493,30 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
                 file_name=f"{area_name}_Edges_Scratch.csv",
                 mime='text/csv',
                 type="primary",
+                use_container_width=True
+            )
+        
+        # 画像ダウンロード
+        st.markdown("**🖼️ 地図画像 (480x360px)**")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 座標軸付き画像 (PNG)",
+                data=img_bytes,
+                file_name=f"{area_name}_Map_With_Axes.png",
+                mime='image/png',
+                type="secondary",
+                use_container_width=True
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 シンプル版画像 (PNG)",
+                data=simple_img_bytes,
+                file_name=f"{area_name}_Map_Simple.png",
+                mime='image/png',
+                type="secondary",
                 use_container_width=True
             )
         
