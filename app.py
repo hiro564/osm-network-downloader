@@ -203,12 +203,13 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
     # --- 地理院タイル（標準地図）を背景に追加 ---
     try:
         cx.add_basemap(
-            ax,
-            crs=gdf_edges.crs,
-            source="https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-            zoom=16,  # ★ 地理院タイルが確実に存在するズーム範囲（14〜17）
-            attribution="地理院タイル（標準地図）"
-        )
+                        ax,
+                        crs=gdf_edges.crs,
+                        source="https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
+                        zoom=16,
+                        attribution="地理院タイル（淡色地図・建物・道路）"
+                        )
+
     except Exception as e:
         print("⚠️ 地理院タイルの取得に失敗しました:", e)
         ax.set_facecolor("white")
