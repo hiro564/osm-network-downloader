@@ -192,7 +192,16 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
             (to_node['Longitude'], to_node['Latitude'])
         ]))
     gdf_edges = gpd.GeoDataFrame(geometry=edge_lines, crs="EPSG:4326")
+    # ズームを自動的に制限（広域なら14、狭域なら17）
+    zoom = 17 if (east - west) < 0.02 else 15
 
+    cx.add_basemap(
+        ax,
+        crs=gdf_edges.crs,
+        source="https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+        zoom=zoom,
+        attribution="地理院タイル"
+    )
     # 図設定
     fig, ax = plt.subplots(figsize=(480/72, 360/72), dpi=72)
 
