@@ -1,8 +1,8 @@
 import streamlit as st
 
-# matplotlibのバックエンドを最初に設定（Streamlit Cloud対応）
+# Set matplotlib backend first (for Streamlit Cloud)
 import matplotlib
-matplotlib.use('Agg')  # GUIなし環境用
+matplotlib.use('Agg')  # For non-GUI environments
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -16,7 +16,7 @@ import contextily as cx
 import geopandas as gpd
 from shapely.geometry import LineString, Point
 
-# Scratch座標系の定義
+# Scratch coordinate system definition
 SCRATCH_WIDTH = 480
 SCRATCH_HEIGHT = 360
 SCRATCH_X_MIN = -240
@@ -25,96 +25,96 @@ SCRATCH_Y_MIN = -180
 SCRATCH_Y_MAX = 180
 
 st.set_page_config(
-    page_title="OSM→Scratch座標変換",
+    page_title="OSM→Scratch Coordinate Converter",
     page_icon="🗺️",
     layout="wide"
 )
 
-st.title("🗺️ OSM道路ネットワーク → Scratch座標系変換ツール")
-st.markdown("OpenStreetMapのデータをScratch座標系（-240〜240, -180〜180）に変換")
+st.title("🗺️ OSM Road Network → Scratch Coordinate System Converter")
+st.markdown("Convert OpenStreetMap data to Scratch coordinate system (-240~240, -180~180)")
 st.markdown("---")
 
-# サイドバー設定
-st.sidebar.header("⚙️ 設定")
+# Sidebar settings
+st.sidebar.header("⚙️ Settings")
 
-# エリア名入力
-area_name = st.sidebar.text_input("エリア名", value="MyArea", help="出力ファイル名に使用されます")
+# Area name input
+area_name = st.sidebar.text_input("Area Name", value="MyArea", help="Used for output file names")
 
-# プリセット選択
-st.sidebar.subheader("📍 プリセット座標")
+# Preset selection
+st.sidebar.subheader("📍 Preset Coordinates")
 preset = st.sidebar.selectbox(
-    "場所を選択",
+    "Select Location",
     options=[
-        "カスタム",
-        "東京タワー周辺",
-        "渋谷駅周辺", 
-        "鎌倉市中心部",
-        "京都駅周辺",
-        "大阪城周辺"
+        "Custom",
+        "Tokyo Tower Area",
+        "Shibuya Station Area", 
+        "Kamakura City Center",
+        "Kyoto Station Area",
+        "Osaka Castle Area"
     ]
 )
 
-# プリセット座標
+# Preset coordinates
 presets = {
-    "東京タワー周辺": (35.660, 35.657, 139.747, 139.743),
-    "渋谷駅周辺": (35.663, 35.655, 139.704, 139.696),
-    "鎌倉市中心部": (35.325, 35.315, 139.555, 139.545),
-    "京都駅周辺": (34.991, 34.983, 135.765, 135.757),
-    "大阪城周辺": (34.691, 34.683, 135.531, 135.523)
+    "Tokyo Tower Area": (35.660, 35.657, 139.747, 139.743),
+    "Shibuya Station Area": (35.663, 35.655, 139.704, 139.696),
+    "Kamakura City Center": (35.325, 35.315, 139.555, 139.545),
+    "Kyoto Station Area": (34.991, 34.983, 135.765, 135.757),
+    "Osaka Castle Area": (34.691, 34.683, 135.531, 135.523)
 }
 
-# 座標範囲入力
-st.sidebar.subheader("📍 取得範囲（緯度経度）")
+# Coordinate range input
+st.sidebar.subheader("📍 Acquisition Range (Latitude/Longitude)")
 
-if preset != "カスタム":
+if preset != "Custom":
     north, south, east, west = presets[preset]
-    st.sidebar.info(f"✅ {preset}を選択中")
+    st.sidebar.info(f"✅ {preset} selected")
 else:
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        north = st.number_input("北端緯度", value=35.360, format="%.6f")
-        south = st.number_input("南端緯度", value=35.290, format="%.6f")
+        north = st.number_input("North Latitude", value=35.360, format="%.6f")
+        south = st.number_input("South Latitude", value=35.290, format="%.6f")
     with col2:
-        east = st.number_input("東端経度", value=139.570, format="%.6f")
-        west = st.number_input("西端経度", value=139.480, format="%.6f")
+        east = st.number_input("East Longitude", value=139.570, format="%.6f")
+        west = st.number_input("West Longitude", value=139.480, format="%.6f")
 
-# 範囲の表示
+# Display range
 st.sidebar.markdown(f"""
-**現在の範囲:**
-- 北: {north:.6f}
-- 南: {south:.6f}
-- 東: {east:.6f}
-- 西: {west:.6f}
+**Current Range:**
+- North: {north:.6f}
+- South: {south:.6f}
+- East: {east:.6f}
+- West: {west:.6f}
 """)
 
-# ネットワークタイプ選択
+# Network type selection
 network_type = st.sidebar.selectbox(
-    "ネットワークタイプ",
+    "Network Type",
     options=['drive', 'walk', 'all', 'bike'],
     index=0,
-    help="drive: 車道, walk: 歩道, all: 全道路, bike: 自転車道"
+    help="drive: roads, walk: sidewalks, all: all roads, bike: bike paths"
 )
 
-# 座標変換関数
+# Coordinate conversion function
 def latlon_to_scratch(lat, lon, bounds):
     """
-    緯度経度をScratch座標系に変換
+    Convert latitude/longitude to Scratch coordinate system
     
     Args:
-        lat: 緯度
-        lon: 経度
+        lat: Latitude
+        lon: Longitude
         bounds: (north, south, east, west)
     
     Returns:
-        (x, y): Scratch座標
+        (x, y): Scratch coordinates
     """
     north, south, east, west = bounds
     
-    # 正規化（0〜1の範囲に）
+    # Normalize (to 0~1 range)
     x_norm = (lon - west) / (east - west)
-    y_norm = (north - lat) / (north - south)  # 緯度は北が大きいので反転
+    y_norm = (north - lat) / (north - south)  # Latitude is inverted (north is larger)
     
-    # Scratch座標系にスケーリング
+    # Scale to Scratch coordinate system
     x_scratch = SCRATCH_X_MIN + x_norm * (SCRATCH_X_MAX - SCRATCH_X_MIN)
     y_scratch = SCRATCH_Y_MIN + y_norm * (SCRATCH_Y_MAX - SCRATCH_Y_MIN)
     
@@ -122,15 +122,15 @@ def latlon_to_scratch(lat, lon, bounds):
 
 def convert_to_scratch_format(G, bounds):
     """
-    OSMグラフをScratch座標系のDataFrameに変換
+    Convert OSM graph to Scratch coordinate system DataFrame
     
     Returns:
-        nodes_df: ノードデータ (ID, X, Y, Latitude, Longitude)
-        edges_df: エッジデータ (FromID, ToID, Distance)
+        nodes_df: Node data (ID, X, Y, Latitude, Longitude)
+        edges_df: Edge data (FromID, ToID, Distance)
     """
-    # ノードデータの作成
+    # Create node data
     nodes_data = []
-    node_id_map = {}  # OSMのノードID → 連番IDのマッピング
+    node_id_map = {}  # Mapping OSM node ID → sequential ID
     
     for i, (osm_id, data) in enumerate(G.nodes(data=True), start=1):
         lat = data['y']
@@ -149,14 +149,14 @@ def convert_to_scratch_format(G, bounds):
     
     nodes_df = pd.DataFrame(nodes_data)
     
-    # エッジデータの作成
+    # Create edge data
     edges_data = []
     
     for u, v, data in G.edges(data=True):
         from_id = node_id_map[u]
         to_id = node_id_map[v]
         
-        # 距離を計算（メートル単位）
+        # Calculate distance (in meters)
         distance = data.get('length', 0)
         
         edges_data.append({
@@ -165,7 +165,7 @@ def convert_to_scratch_format(G, bounds):
             'Distance': round(distance, 2)
         })
         
-        # 逆方向も追加（双方向）
+        # Add reverse direction (bidirectional)
         edges_data.append({
             'FromID': to_id,
             'ToID': from_id,
@@ -178,11 +178,11 @@ def convert_to_scratch_format(G, bounds):
 
 def generate_map_image(G, bounds, nodes_df, edges_df):
     """
-    地理院タイル（建物付き標準地図）を背景にした道路ネットワーク画像（480x360）
+    Road network image with basemap background (480x360)
     """
     north, south, east, west = bounds
 
-    # --- エッジをGeoDataFrame化 ---
+    # --- Convert edges to GeoDataFrame ---
     edge_lines = []
     for _, row in edges_df.iterrows():
         from_node = nodes_df[nodes_df['ID'] == row['FromID']].iloc[0]
@@ -193,34 +193,34 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
         ]))
     gdf_edges = gpd.GeoDataFrame(geometry=edge_lines, crs="EPSG:4326").to_crs(epsg=3857)
 
-    # --- 描画範囲 ---
+    # --- Drawing range ---
     xmin, ymin, xmax, ymax = gdf_edges.total_bounds
 
-    # --- 図を作成 ---
+    # --- Create figure ---
     fig, ax = plt.subplots(figsize=(480/72, 360/72), dpi=72)
     gdf_edges.plot(ax=ax, color='red', linewidth=1.2, alpha=0.8, zorder=2)
 
-    # --- 地理院タイル（標準地図）を背景に追加 ---
+    # --- Add basemap background ---
     try:
         cx.add_basemap(
                         ax,
                         crs=gdf_edges.crs,
                         source="https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
                         zoom=16,
-                        attribution="地理院タイル（淡色地図・建物・道路）"
+                        attribution="CartoDB Light basemap"
                         )
 
     except Exception as e:
-        print("⚠️ 地理院タイルの取得に失敗しました:", e)
+        print("⚠️ Failed to retrieve basemap:", e)
         ax.set_facecolor("white")
 
-    # --- 範囲を固定 ---
+    # --- Fix range ---
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     ax.axis("off")
     plt.tight_layout(pad=0)
 
-    # --- 画像化 ---
+    # --- Convert to image ---
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=72, bbox_inches='tight', pad_inches=0)
     buf.seek(0)
@@ -230,28 +230,28 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
 
 def generate_simple_map_image(nodes_df, edges_df):
     """
-    シンプルな道路ネットワーク画像を生成（480x360ピクセル）
-    背景透過なし、道路のみの表示
+    Generate simple road network image (480x360 pixels)
+    No transparent background, roads only display
     
     Returns:
-        PIL Image: 480x360ピクセルの画像
+        PIL Image: 480x360 pixel image
     """
-    # 図のサイズを正確に設定
+    # Set figure size precisely
     fig, ax = plt.subplots(figsize=(480/72, 360/72), dpi=72)
     
-    # Scratch座標系に合わせる
+    # Match Scratch coordinate system
     ax.set_xlim(SCRATCH_X_MIN, SCRATCH_X_MAX)
     ax.set_ylim(SCRATCH_Y_MIN, SCRATCH_Y_MAX)
     ax.set_aspect('equal')
     
-    # 背景を白に
+    # White background
     ax.set_facecolor('white')
     fig.patch.set_facecolor('white')
     
-    # 軸を非表示
+    # Hide axes
     ax.axis('off')
     
-    # エッジを描画（道路）
+    # Draw edges (roads)
     edge_dict = {}
     for _, row in edges_df.iterrows():
         from_id = row['FromID']
@@ -268,94 +268,94 @@ def generate_simple_map_image(nodes_df, edges_df):
                    [from_node['Y'], to_node['Y']], 
                    color='black', linewidth=2, alpha=1.0, zorder=1)
     
-    # マージンなしで保存
+    # Save without margins
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
     
-    # 画像をバイトストリームに保存
+    # Save image to byte stream
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=72, bbox_inches='tight', 
                 pad_inches=0, facecolor='white')
     buf.seek(0)
     
-    # PIL Imageに変換
+    # Convert to PIL Image
     img = Image.open(buf)
     
-    # 正確に480x360にリサイズ
+    # Resize to exactly 480x360
     img = img.resize((480, 360), Image.Resampling.LANCZOS)
     
     plt.close(fig)
     
     return img
 
-# メインエリア
-st.header("📊 データ取得と変換")
+# Main area
+st.header("📊 Data Acquisition and Conversion")
 
-# Scratch座標系の説明
-with st.expander("ℹ️ Scratch座標系について"):
+# Scratch coordinate system explanation
+with st.expander("ℹ️ About Scratch Coordinate System"):
     st.markdown("""
-    **Scratch座標系の特徴:**
-    - X座標範囲: -240 〜 +240 (画面幅480ピクセル)
-    - Y座標範囲: -180 〜 +180 (画面高360ピクセル)
-    - 原点(0, 0)は画面中央
-    - 右がX正、上がY正
+    **Scratch Coordinate System Features:**
+    - X coordinate range: -240 ~ +240 (screen width 480 pixels)
+    - Y coordinate range: -180 ~ +180 (screen height 360 pixels)
+    - Origin (0, 0) is at screen center
+    - Right is positive X, up is positive Y
     
-    **変換方法:**
-    1. 緯度経度を指定範囲内で正規化(0〜1)
-    2. Scratch座標系にスケーリング
-    3. 小数点第2位まで丸める
+    **Conversion Method:**
+    1. Normalize latitude/longitude within specified range (0~1)
+    2. Scale to Scratch coordinate system
+    3. Round to 2 decimal places
     """)
 
-# Google Maps リンク（範囲確認用）
+# Google Maps link (for range confirmation)
 center_lat = (north + south) / 2
 center_lon = (east + west) / 2
-st.info(f"📍 [Google Mapsで範囲を確認](https://www.google.com/maps/@{center_lat},{center_lon},15z)")
+st.info(f"📍 [Check range on Google Maps](https://www.google.com/maps/@{center_lat},{center_lon},15z)")
 
-# データ取得ボタン
-if st.button("🚀 データ取得＆変換開始", type="primary", use_container_width=True):
+# Data acquisition button
+if st.button("🚀 Start Data Acquisition & Conversion", type="primary", use_container_width=True):
     try:
-        # 入力値の事前検証
+        # Pre-validate input values
         if north <= south:
-            st.error("❌ 北端緯度は南端緯度より大きい値を入力してください")
+            st.error("❌ North latitude must be greater than south latitude")
             st.stop()
         if east <= west:
-            st.error("❌ 東端経度は西端経度より大きい値を入力してください")
+            st.error("❌ East longitude must be greater than west longitude")
             st.stop()
         
-        # プログレスバー
+        # Progress bar
         progress_bar = st.progress(0)
         status = st.empty()
         
-        # ポリゴンを作成
+        # Create polygon
         polygon = box(west, south, east, north)
         bounds = (north, south, east, west)
         
-        # 道路ネットワークデータを取得
-        status.text("📡 道路ネットワークをダウンロード中...")
+        # Retrieve road network data
+        status.text("📡 Downloading road network...")
         progress_bar.progress(20)
         
         G = ox.graph_from_polygon(polygon, network_type=network_type)
         
         progress_bar.progress(50)
-        status.text(f"✅ 取得完了: {len(G.nodes())}ノード, {len(G.edges())}エッジ")
+        status.text(f"✅ Acquisition complete: {len(G.nodes())} nodes, {len(G.edges())} edges")
         
-        # Scratch座標系に変換
-        status.text("🔄 Scratch座標系に変換中...")
+        # Convert to Scratch coordinate system
+        status.text("🔄 Converting to Scratch coordinate system...")
         progress_bar.progress(70)
         
         nodes_df, edges_df = convert_to_scratch_format(G, bounds)
         
-        # 画像生成
-        status.text("🎨 地図画像を生成中...")
+        # Generate images
+        status.text("🎨 Generating map images...")
         progress_bar.progress(85)
         
         map_image = generate_map_image(G, bounds, nodes_df, edges_df)
         simple_map_image = generate_simple_map_image(nodes_df, edges_df)
         
-        # CSV生成
+        # Generate CSV
         node_csv = nodes_df[['ID', 'X', 'Y', 'Latitude', 'Longitude']].to_csv(index=False)
         edge_csv = edges_df.to_csv(index=False)
         
-        # 画像をバイトストリームに変換
+        # Convert images to byte stream
         img_buf = io.BytesIO()
         map_image.save(img_buf, format='PNG')
         img_bytes = img_buf.getvalue()
@@ -365,96 +365,96 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         simple_img_bytes = simple_img_buf.getvalue()
         
         progress_bar.progress(100)
-        status.text("✅ 変換完了！")
+        status.text("✅ Conversion complete!")
         
-        # 結果表示
-        st.success("🎉 データ取得・変換完了！")
+        # Display results
+        st.success("🎉 Data acquisition and conversion complete!")
         
-        # 統計情報
+        # Statistics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("ノード数", f"{len(nodes_df):,}")
+            st.metric("Node Count", f"{len(nodes_df):,}")
         with col2:
-            st.metric("エッジ数", f"{len(edges_df):,}")
+            st.metric("Edge Count", f"{len(edges_df):,}")
         with col3:
-            st.metric("X範囲", f"{nodes_df['X'].min():.1f} 〜 {nodes_df['X'].max():.1f}")
+            st.metric("X Range", f"{nodes_df['X'].min():.1f} ~ {nodes_df['X'].max():.1f}")
         with col4:
-            st.metric("Y範囲", f"{nodes_df['Y'].min():.1f} 〜 {nodes_df['Y'].max():.1f}")
+            st.metric("Y Range", f"{nodes_df['Y'].min():.1f} ~ {nodes_df['Y'].max():.1f}")
         
-        # 座標範囲の確認
+        # Coordinate range confirmation
         st.info(f"""
-        **変換情報:**
-        - 緯度範囲: {south:.6f} 〜 {north:.6f}
-        - 経度範囲: {west:.6f} 〜 {east:.6f}
-        - ネットワークタイプ: {network_type}
-        - Scratch座標: X({SCRATCH_X_MIN}〜{SCRATCH_X_MAX}), Y({SCRATCH_Y_MIN}〜{SCRATCH_Y_MAX})
-        - 画像サイズ: 480 x 360 ピクセル
+        **Conversion Information:**
+        - Latitude range: {south:.6f} ~ {north:.6f}
+        - Longitude range: {west:.6f} ~ {east:.6f}
+        - Network type: {network_type}
+        - Scratch coordinates: X({SCRATCH_X_MIN}~{SCRATCH_X_MAX}), Y({SCRATCH_Y_MIN}~{SCRATCH_Y_MAX})
+        - Image size: 480 x 360 pixels
         """)
         
-        # 地図画像の表示
-        st.subheader("🗺️ 生成された地図画像")
+        # Map image display
+        st.subheader("🗺️ Generated Map Images")
         
-        tab1, tab2 = st.tabs(["📊 座標軸付き", "🎨 シンプル版"])
+        tab1, tab2 = st.tabs(["📊 With Axes", "🎨 Simple Version"])
         
         with tab1:
-            st.image(map_image, caption="道路ネットワーク（座標軸・グリッド付き）", use_container_width=True)
-            st.caption("✅ Scratch座標系の座標軸とグリッド線が表示されています")
+            st.image(map_image, caption="Road Network (with coordinate axes and grid)", use_container_width=True)
+            st.caption("✅ Scratch coordinate system axes and grid lines are displayed")
         
         with tab2:
-            st.image(simple_map_image, caption="道路ネットワーク（道路のみ）", use_container_width=True)
-            st.caption("✅ 道路のみのシンプルな表示。Scratchの背景画像として使用できます")
+            st.image(simple_map_image, caption="Road Network (roads only)", use_container_width=True)
+            st.caption("✅ Simple display with roads only. Can be used as background image in Scratch")
         
-        # データプレビュー
-        with st.expander("📊 ノードデータ プレビュー (Scratch座標系)"):
+        # Data preview
+        with st.expander("📊 Node Data Preview (Scratch Coordinate System)"):
             st.dataframe(
                 nodes_df[['ID', 'X', 'Y', 'Latitude', 'Longitude']].head(20), 
                 use_container_width=True
             )
             
-            # 座標の分布
+            # Coordinate distribution
             col1, col2 = st.columns(2)
             with col1:
-                st.write("**X座標の分布:**")
+                st.write("**X Coordinate Distribution:**")
                 st.write(nodes_df['X'].describe())
             with col2:
-                st.write("**Y座標の分布:**")
+                st.write("**Y Coordinate Distribution:**")
                 st.write(nodes_df['Y'].describe())
         
-        with st.expander("📊 エッジデータ プレビュー"):
+        with st.expander("📊 Edge Data Preview"):
             st.dataframe(edges_df.head(20), use_container_width=True)
-            st.write(f"**総エッジ数:** {len(edges_df):,} (双方向含む)")
-            st.write(f"**平均距離:** {edges_df['Distance'].mean():.2f}m")
+            st.write(f"**Total Edge Count:** {len(edges_df):,} (including bidirectional)")
+            st.write(f"**Average Distance:** {edges_df['Distance'].mean():.2f}m")
         
-        # サンプルコード表示
-        with st.expander("💻 Scratchでの使用例"):
+        # Sample code display
+        with st.expander("💻 Usage Example in Scratch"):
             st.code("""
-// ノードデータの読み込み例
-リスト「NodeID」に [ID列] を追加
-リスト「NodeX」に [X列] を追加
-リスト「NodeY」に [Y列] を追加
+// Example of loading node data
+Add [ID column] to list "NodeID"
+Add [X column] to list "NodeX"
+Add [Y column] to list "NodeY"
 
-// エッジデータの読み込み例
-リスト「LinkFrom」に [FromID列] を追加
-リスト「LinkTo」に [ToID列] を追加
+// Example of loading edge data
+Add [FromID column] to list "LinkFrom"
+Add [ToID column] to list "LinkTo"
 
-// ノードの座標を取得
-[リスト「NodeX」の (ノード番号) 番目] → X座標
-[リスト「NodeY」の (ノード番号) 番目] → Y座標
+// Get node coordinates
+[Item (node number) of list "NodeX"] → X coordinate
+[Item (node number) of list "NodeY"] → Y coordinate
 
-// その座標に移動
-(X座標), (Y座標) へ行く
+// Move to that coordinate
+Go to x: (X coordinate) y: (Y coordinate)
 """, language="text")
         
-        # ダウンロードボタン
-        st.subheader("📥 ダウンロード")
+        # Download buttons
+        st.subheader("📥 Download")
         
-        # CSVダウンロード
-        st.markdown("**📊 CSVデータ**")
+        # CSV download
+        st.markdown("**📊 CSV Data**")
         col1, col2 = st.columns(2)
         
         with col1:
             st.download_button(
-                label="📥 ノードCSV (ID, X, Y, Lat, Lon)",
+                label="📥 Node CSV (ID, X, Y, Lat, Lon)",
                 data=node_csv,
                 file_name=f"{area_name}_Nodes_Scratch.csv",
                 mime='text/csv',
@@ -464,7 +464,7 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         
         with col2:
             st.download_button(
-                label="📥 エッジCSV (FromID, ToID, Distance)",
+                label="📥 Edge CSV (FromID, ToID, Distance)",
                 data=edge_csv,
                 file_name=f"{area_name}_Edges_Scratch.csv",
                 mime='text/csv',
@@ -472,13 +472,13 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
                 use_container_width=True
             )
         
-        # 画像ダウンロード
-        st.markdown("**🖼️ 地図画像 (480x360px)**")
+        # Image download
+        st.markdown("**🖼️ Map Images (480x360px)**")
         col1, col2 = st.columns(2)
         
         with col1:
             st.download_button(
-                label="📥 座標軸付き画像 (PNG)",
+                label="📥 Image with Axes (PNG)",
                 data=img_bytes,
                 file_name=f"{area_name}_Map_With_Axes.png",
                 mime='image/png',
@@ -488,7 +488,7 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
         
         with col2:
             st.download_button(
-                label="📥 シンプル版画像 (PNG)",
+                label="📥 Simple Version Image (PNG)",
                 data=simple_img_bytes,
                 file_name=f"{area_name}_Map_Simple.png",
                 mime='image/png',
@@ -496,11 +496,11 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
                 use_container_width=True
             )
         
-        # 詳細データ（緯度経度含む）のダウンロード
-        with st.expander("📥 詳細データのダウンロード"):
+        # Detailed data download (including latitude/longitude)
+        with st.expander("📥 Download Detailed Data"):
             full_node_csv = nodes_df.to_csv(index=False)
             st.download_button(
-                label="📥 ノード詳細CSV (OSM_ID含む)",
+                label="📥 Detailed Node CSV (including OSM_ID)",
                 data=full_node_csv,
                 file_name=f"{area_name}_Nodes_Full.csv",
                 mime='text/csv',
@@ -508,11 +508,11 @@ if st.button("🚀 データ取得＆変換開始", type="primary", use_containe
             )
         
     except Exception as e:
-        st.error(f"❌ エラーが発生しました")
+        st.error(f"❌ An error occurred")
         st.exception(e)
-        st.info("💡 ヒント: 範囲が広すぎる可能性があります。範囲を狭めて再試行してください。")
+        st.info("💡 Hint: The range may be too large. Try narrowing the range and retry.")
 
-# フッター
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
