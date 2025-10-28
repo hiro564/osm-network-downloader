@@ -1,10 +1,15 @@
 import streamlit as st
+
+# matplotlibのバックエンドを最初に設定（Streamlit Cloud対応）
+import matplotlib
+matplotlib.use('Agg')  # GUIなし環境用
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import osmnx as ox
 import pandas as pd
 from shapely.geometry import box
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from PIL import Image
 import io
 
