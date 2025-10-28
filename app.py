@@ -205,7 +205,7 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
         cx.add_basemap(
                         ax,
                         crs=gdf_edges.crs,
-                        source="https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
+                        source="https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
                         zoom=16,
                         attribution="地理院タイル（淡色地図・建物・道路）"
                         )
