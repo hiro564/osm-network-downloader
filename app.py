@@ -178,11 +178,11 @@ def convert_to_scratch_format(G, bounds):
 
 def generate_map_image(G, bounds, nodes_df, edges_df):
     """
-    地理院タイル（建物付き）を背景にした道路ネットワーク画像を生成（480x360）
+    地理院タイル（建物付き標準地図）を背景にした道路ネットワーク画像（480x360）
     """
     north, south, east, west = bounds
 
-    # エッジをGeoDataFrameに変換
+    # --- エッジをGeoDataFrame化 ---
     edge_lines = []
     for _, row in edges_df.iterrows():
         from_node = nodes_df[nodes_df['ID'] == row['FromID']].iloc[0]
@@ -191,42 +191,35 @@ def generate_map_image(G, bounds, nodes_df, edges_df):
             (from_node['Longitude'], from_node['Latitude']),
             (to_node['Longitude'], to_node['Latitude'])
         ]))
-    gdf_edges = gpd.GeoDataFrame(geometry=edge_lines, crs="EPSG:4326")
-    # ズームを自動的に制限（広域なら14、狭域なら17）
-    zoom = 17 if (east - west) < 0.02 else 15
+    gdf_edges = gpd.GeoDataFrame(geometry=edge_lines, crs="EPSG:4326").to_crs(epsg=3857)
 
-    cx.add_basemap(
-        ax,
-        crs=gdf_edges.crs,
-        source="https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-        zoom=zoom,
-        attribution="地理院タイル"
-    )
-    # 図設定
+    # --- 描画範囲 ---
+    xmin, ymin, xmax, ymax = gdf_edges.total_bounds
+
+    # --- 図を作成 ---
     fig, ax = plt.subplots(figsize=(480/72, 360/72), dpi=72)
+    gdf_edges.plot(ax=ax, color='red', linewidth=1.2, alpha=0.8, zorder=2)
 
-    # 緯度経度→Webメルカトル変換
-    gdf_edges = gdf_edges.to_crs(epsg=3857)
-    
-    # 背景に地理院地図（建物付き）を追加
-    cx.add_basemap(
-        ax,
-        crs=gdf_edges.crs,
-        source="https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-        attribution="地理院タイル"
-    )
+    # --- 地理院タイル（標準地図）を背景に追加 ---
+    try:
+        cx.add_basemap(
+            ax,
+            crs=gdf_edges.crs,
+            source="https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+            zoom=16,  # ★ 地理院タイルが確実に存在するズーム範囲（14〜17）
+            attribution="地理院タイル（標準地図）"
+        )
+    except Exception as e:
+        print("⚠️ 地理院タイルの取得に失敗しました:", e)
+        ax.set_facecolor("white")
 
-    # 道路ネットワーク描画
-    gdf_edges.plot(ax=ax, color='red', linewidth=1.5, alpha=0.8)
-
-    # 表示範囲設定
-    ax.set_xlim(gdf_edges.total_bounds[0], gdf_edges.total_bounds[2])
-    ax.set_ylim(gdf_edges.total_bounds[1], gdf_edges.total_bounds[3])
-
-    ax.axis('off')
+    # --- 範囲を固定 ---
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+    ax.axis("off")
     plt.tight_layout(pad=0)
 
-    # 画像出力
+    # --- 画像化 ---
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=72, bbox_inches='tight', pad_inches=0)
     buf.seek(0)
